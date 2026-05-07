@@ -1,130 +1,123 @@
 import numpy as np
 import itertools
+
 from knapsack.knapsack_strategy import Strategy
 from knapsack.nondeterministic_greedy import NonDeterministicGreedyStrategy
 
+
 class LocalSearchFirstImprovement(Strategy):
-    
-    def generateNeighbors(self, instance, solution):
-        """
-        Generate feasible neighboring solutions by exploring move types.
-        Each neighbor is represented as a move tuple (drop_idxs, add_idxs),
-        encoding only the *change* (not the full solution vector), so that
-        the actual decision array is reconstructed lazily when needed.
-        """
 
-        c_decision = solution["decision"]
-        W_cap = instance["capacity"]
-        weights = instance["weights"]
-        profits = instance["profits"]
-        
-        inside_items = np.where(c_decision == 1)[0]
-        outside_items = np.where(c_decision == 0)[0]
+    # =========================================================
+    # Move evaluation (core reusable function)
+    # =========================================================
+    def _evaluate_move(self, solution, weights, profits, capacity, drop, add):
 
-        outside_pairs = list(itertools.combinations(outside_items, 2))
-        inside_pairs = list(itertools.combinations(inside_items, 2))
+        weight_delta = 0
+        profit_delta = 0
 
-        # Helper 
-        def get_move(drop_idxs, add_idxs):
-            w_delta = sum(weights[j] for j in add_idxs) - sum(weights[i] for i in drop_idxs)
+        for i in drop:
+            weight_delta -= weights[i]
+            profit_delta -= profits[i]
 
-            # feasibility check
-            if solution["weight"] + w_delta <= W_cap:
-                p_delta = sum(profits[j] for j in add_idxs) - sum(profits[i] for i in drop_idxs)
+        for j in add:
+            weight_delta += weights[j]
+            profit_delta += profits[j]
 
-                # return the solution
-                return {
+        new_weight = solution["weight"] + weight_delta
 
-                    "profit": solution["profit"] + p_delta,
-                    "weight": solution["weight"] + w_delta,
-
-                    # encode the neighbor by a move, the caller should reconstruct the neighbor,
-                    # which is more efficient
-                    "move": (drop_idxs, add_idxs)
-                }
+        if new_weight > capacity:
             return None
 
+        return {
+            "profit": solution["profit"] + profit_delta,
+            "weight": new_weight,
+            "move": (drop, add)
+        }
+
+    # =========================================================
+    # Neighbor generator (streaming, no storage)
+    # =========================================================
+    def generate_neighbors(self, instance, solution):
+
+        decision = solution["decision"]
+        weights = instance["weights"]
+        profits = instance["profits"]
+        capacity = instance["capacity"]
+
+        inside = np.where(decision == 1)[0]
+        outside = np.where(decision == 0)[0]
+
+        eval_move = lambda d, a: self._evaluate_move(
+            solution, weights, profits, capacity, d, a
+        )
+
+        # -------------------------
         # 1-out / 1-in
-        for i in inside_items:
-            for j in outside_items:
-                move = get_move([i], [j])
-                if move:
-                    # yield is the as return 
-                    yield move
+        # -------------------------
+        for i in inside:
+            for j in outside:
+                n = eval_move([i], [j])
+                if n:
+                    yield n
 
+        # -------------------------
         # 1-out / 2-in
-        for i in inside_items:
-            for pair in outside_pairs:
-                move = get_move([i], pair)
-                if move:
-                    # yield is the as return
-                    yield move
+        # -------------------------
+        for i in inside:
+            for a in itertools.combinations(outside, 2):
+                n = eval_move([i], list(a))
+                if n:
+                    yield n
 
+        # -------------------------
         # 2-out / 1-in
-        for pair in inside_pairs:
-            for j in outside_items:
-                move = get_move(pair, [j])
-                if move:
-                    # yield is the as return 
-                    yield move
+        # -------------------------
+        for d in itertools.combinations(inside, 2):
+            for j in outside:
+                n = eval_move(list(d), [j])
+                if n:
+                    yield n
 
-        # 2-out / 2-out
-        for p_in in inside_pairs:
-            for p_out in outside_pairs:
-                move = get_move(p_in, p_out)
-                if move: 
-                    # yield is the as return
-                    yield move
+        # -------------------------
+        # 2-out / 2-in
+        # -------------------------
+        for d in itertools.combinations(inside, 2):
+            for a in itertools.combinations(outside, 2):
+                n = eval_move(list(d), list(a))
+                if n:
+                    yield n
 
-
+    # =========================================================
+    # Solver (First Improvement)
+    # =========================================================
     def solve(self, instance: dict) -> dict:
 
-        W = instance["capacity"]
-
-        nondeterministic_greedy = NonDeterministicGreedyStrategy()
-
-        solution = nondeterministic_greedy.solve(instance)
+        greedy = NonDeterministicGreedyStrategy()
+        solution = greedy.solve(instance)
 
         while True:
-            found_improvement = False
-            
-            i = 0
 
-            # Iterate through the generator, the generator will return the next neighbor upon request
-            for neighbor in self.generateNeighbors(instance, solution):
+            improved = False
 
-                # see up to 100000 neighbor
-                if i > 99999:
-                    break
+            for neighbor in self.generate_neighbors(instance, solution):
 
                 if neighbor["profit"] > solution["profit"]:
 
-                    # improvement found
-                    drops, adds = neighbor["move"]
+                    drop, add = neighbor["move"]
 
-                    for idx in drops: 
-                        solution["decision"][idx] = 0
+                    for i in drop:
+                        solution["decision"][i] = 0
 
-                    for idx in adds:  
-                        solution["decision"][idx] = 1
-                    
+                    for j in add:
+                        solution["decision"][j] = 1
+
                     solution["profit"] = neighbor["profit"]
                     solution["weight"] = neighbor["weight"]
-                    
-                    found_improvement = True
-                    break
 
-                i += 1
-            
-            if not found_improvement:
+                    improved = True
+                    break  # FIRST improvement
 
-                # local optimum is reached
-                break 
-                
-        
-        return {
-            "profit": solution["profit"],
-            "weight": solution["weight"],
-            "decision": solution["decision"],
-        }
-             
+            if not improved:
+                break
+
+        return solution

@@ -1,64 +1,55 @@
 import numpy as np
-from tsp.tsp_strategy import Strategy
 import heapq
 import random
+from tsp.tsp_strategy import Strategy
+
 
 class NonDeterministicGreedyStrategy(Strategy):
 
+    # =========================================================
+    # Solve TSP (stochastic greedy)
+    # =========================================================
     def solve(self, instance: np.ndarray) -> dict:
 
-        # Initilize the number of cities
-        num_of_cities = instance.shape[1]
+        n = instance.shape[0]
+        adj = instance
 
-        # the graph of cities modeled as an adjancency matrix
-        adj_matrix = instance
-
-        # Initiaze the set of visited cities, which is empty at the beginnig
         visited = set()
 
-        # path taken to make a tour, which empty at the beginnig
-        path = []
+        # random start improves diversity
+        current = random.randint(0, n - 1)
 
-        # Start from city 0 and mark it as visited, 
-        # and initialize the number of visited cities to 1.
-        # Also, because it is the starting point, add to the path list
-        current_city = 0
-        visited.add(0)
-        path.append(0)
+        visited.add(current)
+        path = [current]
 
-        total_distance = 0
+        total = 0.0
 
-        # While we haven't visited all cities
-        while len(visited) < num_of_cities:
-            
-            i = current_city
+        while len(visited) < n:
 
-            candidates = (
-                (adj_matrix[i, j], (i, j))
-                for j in range(num_of_cities)
-                if j not in visited
-            )
+            candidates = []
 
-            # sort the candidates using a heap sort, then pick the 3 smallest ones
-            best3 = heapq.nsmallest(3, candidates)
+            for j in range(n):
+                if j not in visited:
+                    candidates.append((adj[current, j], j))
 
-            # pick the next item randomly of the 3 best candidates
-            best = random.choice(best3)
+            # take top-k best candidates
+            k = min(3, len(candidates))
+            best_k = heapq.nsmallest(k, candidates)
 
-            # update the distance 
-            total_distance += best[0]
+            # stochastic selection among best-k
+            cost, next_city = random.choice(best_k)
 
-            # mark the new city as visited
-            visited.add(best[1][1])
+            total += cost
+            visited.add(next_city)
+            path.append(next_city)
 
-            # mark the new city as the current city
-            current_city = best[1][1]
+            current = next_city
 
-            # append it to the path
-            path.append(best[1][1])
+        # close tour
+        total += adj[path[-1], path[0]]
+        path.append(path[0])
 
-        # close the tour and update the total distance     
-        total_distance += adj_matrix[0, path[-1]]
-        path.append(0)   
-
-        return {"distance" : total_distance, "path" : path}
+        return {
+            "distance": total,
+            "path": path
+        }

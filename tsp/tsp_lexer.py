@@ -1,69 +1,65 @@
 import ply.lex as lex
 
+# =========================================================
+# TOKENS
+# =========================================================
 tokens = (
-   'NUMBER',
-   'DIMENSION',
-   'COORDINATION_SECTION',
-   'EOF',
-   'NAME'
+    "NAME",
+    "DIMENSION",
+    "NUMBER",
+    "SECTION",
 )
 
-reserved = {
-    'DIMENSION': 'DIMENSION',
-    'NODE_COORD_SECTION': 'COORDINATION_SECTION',
-    'DISPLAY_DATA_SECTION': 'COORDINATION_SECTION',
-    'EOF': 'EOF',
-    'NAME':'NAME',       
-}
-
+# =========================================================
+# NAME (e.g., NAME: kroA100)
+# =========================================================
 def t_NAME(t):
-    r'NAME\s*:\s*\S+'
-    t.value = t.value.split(':', 1)[1].strip()
+    r"NAME\s*:\s*\S+"
+    t.value = t.value.split(":", 1)[1].strip()
     return t
 
+# =========================================================
+# DIMENSION (we only detect keyword, not value here)
+# =========================================================
+def t_DIMENSION(t):
+    r"DIMENSION\s*:"
+    return t
 
+# =========================================================
+# SECTION HEADERS
+# =========================================================
+def t_SECTION(t):
+    r"NODE_COORD_SECTION|DISPLAY_DATA_SECTION"
+    return t
+
+# =========================================================
+# NUMBERS (safe, simple)
+# =========================================================
 def t_NUMBER(t):
-    r'(?<=\s|:)[+-]?\d+(\.\d+)?([eE][+-]?\d+)?(?=\s|$)'
+    r"[+-]?\d+(\.\d+)?([eE][+-]?\d+)?"
     t.value = float(t.value)
     return t
 
-
-
-flag = 1
-
-def t_DIMENSION(t):
-    r'DIMENSION\s*:\s*'
-    return t
-
-t_COORDINATION_SECTION = r'NODE_COORD_SECTION|DISPLAY_DATA_SECTION'
-
-t_EOF = 'EOF'
-t_ignore = ' \t' 
-
-def t_error(t):
-    
-    line_end = t.value.find('\n')
-    
-    if line_end != -1:
-        
-        t.lexer.skip(line_end)
-    else:
-        
-        t.lexer.skip(len(t.value))
-
+# =========================================================
+# NEWLINES
+# =========================================================
 def t_newline(t):
-    r'\n+'
+    r"\n+"
     t.lexer.lineno += len(t.value)
 
-def p_error(p):
-    if p:
-        print(f"Token Error: {p.type} ('{p.value}') at line {p.lineno}")
-    else:
-        print("Unexpected End of File (EOF)")
+# =========================================================
+# IGNORE SPACES/TABS
+# =========================================================
+t_ignore = " \t"
 
-# Build the lexer
+# =========================================================
+# ERROR HANDLING
+# =========================================================
+def t_error(t):
+    print(f"[Lexer Error] Illegal char '{t.value[0]}' at line {t.lineno}")
+    t.lexer.skip(1)
+
+# =========================================================
+# BUILD LEXER
+# =========================================================
 lexer = lex.lex()
-
-
-
-

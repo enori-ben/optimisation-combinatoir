@@ -1,53 +1,65 @@
 import numpy as np
+
 from knapsack.knapsack_strategy import Strategy
 
 
 class DeterministicGreedyStrategy(Strategy):
 
     def solve(self, instance: dict) -> dict:
-        
-        # get the number of items
-        n_items = instance["profits"].shape[0]
-        
-        # extract the list of profits and weights, as well as the maximum capacity of the bag
+        """
+        Solves the 0/1 Knapsack Problem
+        using a deterministic greedy heuristic.
+        """
+
+        # =====================================================
+        # Extract problem data
+        # =====================================================
         profits = instance["profits"]
         weights = instance["weights"]
-        W = instance["capacity"]
-        
-        # Calculate ratios and sort the array in descending order, then return the list of indices
+        capacity = instance["capacity"]
+
+        n_items = len(profits)
+
+        # =====================================================
+        # Compute profit-to-weight ratios
+        # =====================================================
         ratios = profits / weights
+
+        # Sort items by descending ratio
         sorted_indices = np.argsort(-ratios)
 
+        # =====================================================
+        # Initialize solution
+        # =====================================================
+        current_weight = 0
+        decision_array = np.zeros(n_items, dtype=int)
 
-        # initialize the current weight of the bag by zero
-        w = 0
-
-        # initialize the decision bit array by zeros, since no item is chosen yet
-        decision_array = np.zeros(n_items)
-
-        # pick items greedly
+        # =====================================================
+        # Greedy selection
+        # =====================================================
         for idx in sorted_indices:
-            if w + weights[idx] <= W:
 
-                # update the decision bit
+            item_weight = weights[idx]
+
+            # Check capacity constraint
+            if current_weight + item_weight <= capacity:
+
+                # Select item
                 decision_array[idx] = 1
-                w += weights[idx]
 
-        # Final profit calculation using the decision mask (simple dot product will do the job)
-        max_profit = np.dot(profits, decision_array)
+                # Update current weight
+                current_weight += item_weight
 
-        # return the solution
+        # =====================================================
+        # Compute total profit
+        # =====================================================
+        total_profit = int(np.dot(profits, decision_array))
+
+        # =====================================================
+        # Return final solution
+        # =====================================================
         return {
-            "profit": max_profit,
-            "weight": w,
+            "profit": total_profit,
+            "weight": current_weight,
             "decision": decision_array
         }
-
-
-
-
-
-
-
-        
-

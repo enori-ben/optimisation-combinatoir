@@ -2,93 +2,75 @@ import numpy as np
 from tsp.tsp_strategy import Strategy
 from tsp.nondeterministic_greedy import NonDeterministicGreedyStrategy
 
+
 class LocalSearchFirstImprovement(Strategy):
-    
-    # Helper function used to compute the change if we swap the edges (i, i+1) and (j, j+1)
-    def compute_change(self, path, i, j, adj_matrix):
-        
-        edge1 = (path[i], path[i+1])
-        edge2 = (path[j], path[j+1])
 
-        # calculate the change
-        change = (adj_matrix[edge1[0], edge2[0]] + adj_matrix[edge1[1], edge2[1]]) \
-                - (adj_matrix[edge1[0], edge1[1]] + adj_matrix[edge2[0], edge2[1]])
-        
-        return change
+    # =========================================================
+    # 2-opt delta computation
+    # =========================================================
+    def compute_delta(self, path, i, j, adj):
 
-    def make_an_improvement(self, n, path, adj_matrix):
-        count = 0
+        a, b = path[i], path[i + 1]
+        c, d = path[j], path[j + 1]
 
-        # visit at maximum 10000 neighbors, otherwise it would take very long time
-        max_neighbors = 10000
+        removed = adj[a, b] + adj[c, d]
+        added = adj[a, c] + adj[b, d]
 
-        for i in range(n - 2):
+        return added - removed
+
+    # =========================================================
+    # First improvement search
+    # =========================================================
+    def first_improvement(self, n, path, adj):
+
+        for i in range(n - 1):
             for j in range(i + 2, n):
 
-                # Skip adjacent edges
-                if (j + 1) % n == i:
-                    continue
-                
-                # Increment and check the budget
-                count += 1
-                if count > max_neighbors:
+                delta = self.compute_delta(path, i, j, adj)
 
-                    # No better solution found in the 1st 10000 neighbors
-                    return {"change": 0, "edges": None}
+                if delta < 0:
+                    return i, j, delta
 
-                change = self.compute_change(path, i, j, adj_matrix)
-                
-                # check is the change is negative, which implies an improvement is found
-                if change < 0:
-                    return {"change": change, "edges": (i, j)}
+        return None
 
-        # No better solution found
-        return {"change": 0, "edges": None}
-                
-
+    # =========================================================
+    # Solve
+    # =========================================================
     def solve(self, instance: np.ndarray) -> dict:
 
-        # Initilize the number of cities
-        num_of_cities = instance.shape[1]
+        n = instance.shape[0]
+        adj = instance
 
-        # the graph of cities modeled as an adjancency matrix
-        adj_matrix = instance
-        
-        # get a random initial solution using a nondetermistic greedy approach
-        nondeterminitic_greedy = NonDeterministicGreedyStrategy()
-        initial_solution = nondeterminitic_greedy.solve(instance)
+        greedy = NonDeterministicGreedyStrategy()
+        solution = greedy.solve(instance)
 
-        # Assume the initial solution is the best one
-        current_local_optimum_cost = initial_solution["distance"]
-        path = initial_solution["path"]
-
+        path = solution["path"]
+        cost = solution["distance"]
 
         improved = True
 
-        # while there is an improvement
         while improved:
-            
-            # iterate the neighbors and stop on the first neighbor with a shorter distance
-            result =  self.make_an_improvement(num_of_cities, path, adj_matrix)
 
-            if result["change"] < 0:
-
-                # update optimal distance
-                current_local_optimum_cost += result["change"]
-
-                edges_to_swap = result["edges"]
-
-                i = edges_to_swap[0]
-                j = edges_to_swap[1]
-
-                # update path
-                new_path = path[:i+1] + path[j:i:-1] + path[j+1:]
-                path = new_path
-
-                # jump to the while loop directly
-                continue
-
-            # There is no improvement
             improved = False
-        
-        return {"distance" : current_local_optimum_cost, "path" : path}
+
+            result = self.first_improvement(n, path, adj)
+
+            if result is None:
+                break
+
+            i, j, delta = result
+
+            # apply 2-opt move
+            path = (
+                path[:i + 1]
+                + path[i + 1:j + 1][::-1]
+                + path[j + 1:]
+            )
+
+            cost += delta
+            improved = True
+
+        return {
+            "distance": cost,
+            "path": path
+        }

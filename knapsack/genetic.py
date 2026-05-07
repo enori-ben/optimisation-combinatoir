@@ -1,195 +1,302 @@
+import random
 import numpy as np
+
 from knapsack.knapsack_strategy import Strategy
 from knapsack.nondeterministic_greedy import NonDeterministicGreedyStrategy
-import random
+
 
 class GeneticStrategy(Strategy):
 
-    # The select operator
-    def selectOperator(self, solutions):
+    POPULATION_SIZE = 100
+    MAX_ITERATIONS = 100
+    MUTATION_RATE = 0.01
+
+    # =========================================================
+    # Selection
+    # =========================================================
+    def select_operator(self, population):
         """
-        Tournament selection: keeps 50% of the population.
+        Tournament selection.
+        Keeps 50% of the population.
         """
         selected = []
+        target_size = len(population) // 2
 
-        # target is to select 50% of the population
-        target = len(solutions) // 2
+        for _ in range(target_size):
 
-        for _ in range(target):
+            # Randomly choose 2 individuals
+            i, j = np.random.choice(len(population), size=2, replace=False)
 
-            # randomly pick 2 solutions
-            i, j = np.random.choice(len(solutions), size=2, replace=False)
-            p_i = solutions[i]["profit"]
-            p_j = solutions[j]["profit"]
-            
-            # Select the one with bigger profit
-            winner = solutions[i] if p_i > p_j else solutions[j]
+            candidate_1 = population[i]
+            candidate_2 = population[j]
+
+            # Keep the one with the higher profit
+            winner = (
+                candidate_1
+                if candidate_1["profit"] > candidate_2["profit"]
+                else candidate_2
+            )
+
             selected.append(winner)
-        
-        return selected 
 
-    def repair_knapsack(self, solution, weights, values, max_capacity):
+        return selected
+
+    # =========================================================
+    # Repair Function
+    # =========================================================
+    def repair_solution(self, solution, weights, profits, capacity):
         """
-        Repairs an infeasible solution using the Greedy Drop Heuristic.
+        Repairs an infeasible knapsack solution
+        using a Greedy Drop Heuristic.
         """
-        
-        # Calculate current total weight
-        current_weight = sum(w for i, w in enumerate(weights) if solution[i] == 1)
-        
-        # If the knapsack is within limits, no repair needed
-        if current_weight <= max_capacity:
+
+        current_weight = sum(
+            weights[i]
+            for i, gene in enumerate(solution)
+            if gene == 1
+        )
+
+        # Already feasible
+        if current_weight <= capacity:
             return solution
 
-        # Identify indices of items currently in the knapsack (gene == 1)
-        included_indices = [i for i, gene in enumerate(solution) if gene == 1]
+        # Get included items
+        included_items = [
+            i for i, gene in enumerate(solution)
+            if gene == 1
+        ]
 
-        # Sort these indices by value/weight ratio (ascending: worst first)
-        included_indices.sort(key=lambda i: values[i] / weights[i])
+        # Sort by value/weight ratio (worst first)
+        included_items.sort(
+            key=lambda i: profits[i] / weights[i]
+        )
 
-        # Iteratively remove items until the weight is feasible
-        for idx in included_indices:
-            if current_weight <= max_capacity:
+        # Remove worst items until feasible
+        for idx in included_items:
+
+            if current_weight <= capacity:
                 break
-            
-            # Flip the gene from 1 to 0
+
             solution[idx] = 0
             current_weight -= weights[idx]
 
-        return solution 
-    
+        return solution
 
-    def crossover(self, instance, solutions):
+    # =========================================================
+    # Crossover
+    # =========================================================
+    def crossover(self, instance, selected_population):
         """
-        Simple Ordered Crossover (OX) with a single cut-point (split into 2 segments).
+        Single-point crossover.
         """
+
         children = []
 
-        indices = list(range(len(solutions)))
-        np.random.shuffle(indices)
+        shuffled_indices = list(range(len(selected_population)))
+        np.random.shuffle(shuffled_indices)
 
+        weights = instance["weights"]
+        profits = instance["profits"]
+        capacity = instance["capacity"]
 
+        for idx in range(0, len(shuffled_indices) - 1, 2):
 
-        def ox(parent_a, parent_b, cut):
-            """OX with a single cut point."""
-            segment1 = parent_a[:cut]
-            segment2 = parent_b[cut:]
+            parent_1 = selected_population[
+                shuffled_indices[idx]
+            ]["decision"]
 
-            child = np.concatenate((segment1, segment2))
+            parent_2 = selected_population[
+                shuffled_indices[idx + 1]
+            ]["decision"]
 
-            # Repair the solution if it is not feasible
-            child = self.repair_knapsack(child, instance["weights"], \
-                                         instance["profits"], instance["capacity"])
+            chromosome_length = len(parent_1)
 
-            return child
+            # Random crossover point
+            cut_point = np.random.randint(1, chromosome_length)
 
+            # Create children
+            child_1 = np.concatenate((
+                parent_1[:cut_point],
+                parent_2[cut_point:]
+            ))
 
-        for idx in range(0, len(indices) - 1, 2):
-            p1 = solutions[indices[idx]]["decision"]
-            p2 = solutions[indices[idx + 1]]["decision"]
+            child_2 = np.concatenate((
+                parent_2[:cut_point],
+                parent_1[cut_point:]
+            ))
 
-            n = len(p1)
+            # Repair infeasible children
+            child_1 = self.repair_solution(
+                child_1,
+                weights,
+                profits,
+                capacity
+            )
 
-            # Random cut point
-            k = np.random.randint(1, n)
+            child_2 = self.repair_solution(
+                child_2,
+                weights,
+                profits,
+                capacity
+            )
 
-            child1 = ox(p1, p2, k)
-            child2 = ox(p1, p2, k)
-
-            
-            children.append(child1)
-            children.append(child2)
+            children.extend([child_1, child_2])
 
         return children
 
-    def mutate(self, children, mutation_rate, weights, values, max_capacity):
+    # =========================================================
+    # Mutation
+    # =========================================================
+    def mutate(self, children, mutation_rate,
+               weights, profits, capacity):
         """
-        Mutates a batch of children and ensures they remain feasible.
+        Applies bit-flip mutation.
         """
+
         mutated_population = []
 
         for solution in children:
+
             mutated = False
-            
-            # Gene-level mutation
-            for i in range(len(solution)):
+
+            for gene_index in range(len(solution)):
+
                 if random.random() < mutation_rate:
+
                     # Flip bit
-                    solution[i] = 1 - solution[i]  
+                    solution[gene_index] = (
+                        1 - solution[gene_index]
+                    )
+
                     mutated = True
-            
-            # Repair only if a mutation actually occurred 
-            # no need to repair if nothing changed)
+
+            # Repair only if mutation occurred
             if mutated:
-                solution = self.repair_knapsack(solution, weights, values, max_capacity)
-            
+                solution = self.repair_solution(
+                    solution,
+                    weights,
+                    profits,
+                    capacity
+                )
+
             mutated_population.append(solution)
-            
+
         return mutated_population
 
-    def best_path(self, solutions):
-        """Return the solution dict with the smallest distance."""
-        return min(solutions, key=lambda s: s["distance"])
-
-
-    # Helper function just to make the solutions as a list of dictionary objects
-    def format_children(self, children, weights, values):
+    # =========================================================
+    # Formatting
+    # =========================================================
+    def format_population(self, population, weights, profits):
         """
-        Transforms a list of binary arrays into a list of dictionaries 
-        containing profit, weight, and the decision array.
+        Converts binary solutions into dictionaries
+        containing:
+            - profit
+            - weight
+            - decision vector
         """
-        formatted_results = []
-        
-        for decision_array in children:
-            # Calculate total profit and weight for the current decision
-            current_profit = sum(v for i, v in enumerate(values) if decision_array[i] == 1)
-            current_weight = sum(w for i, w in enumerate(weights) if decision_array[i] == 1)
-            
-            # Create the dictionary object
-            obj = {
-                "profit": current_profit,
-                "weight": current_weight,
-                "decision": list(decision_array)  
-            }
-            
-            formatted_results.append(obj)
-            
-        return formatted_results
 
-    def solve(self, instance: np.ndarray) -> dict:
+        formatted_population = []
 
-        MAX_ITERATION = 100
+        for solution in population:
+
+            total_profit = sum(
+                profits[i]
+                for i, gene in enumerate(solution)
+                if gene == 1
+            )
+
+            total_weight = sum(
+                weights[i]
+                for i, gene in enumerate(solution)
+                if gene == 1
+            )
+
+            formatted_population.append({
+                "profit": total_profit,
+                "weight": total_weight,
+                "decision": list(solution)
+            })
+
+        return formatted_population
+
+    # =========================================================
+    # Initial Population
+    # =========================================================
+    def generate_initial_population(self, instance):
+        """
+        Generates the initial population
+        using a non-deterministic greedy strategy.
+        """
+
+        population = []
+
+        for _ in range(self.POPULATION_SIZE):
+
+            strategy = NonDeterministicGreedyStrategy()
+            solution = strategy.solve(instance)
+
+            population.append(solution)
+
+        return population
+
+    # =========================================================
+    # Main Solver
+    # =========================================================
+    def solve(self, instance):
+        """
+        Solves the knapsack problem
+        using a Genetic Algorithm.
+        """
+
+        weights = instance["weights"]
+        profits = instance["profits"]
+        capacity = instance["capacity"]
 
         # Generate initial population
-        solutions = []
-        for _ in range(100):
-            nondeterministic_greedy = NonDeterministicGreedyStrategy()
-            solution = nondeterministic_greedy.solve(instance)
-            solutions.append(solution)
+        population = self.generate_initial_population(instance)
 
-        # Evolve the population across iterations
-        for i in range(MAX_ITERATION):
+        # Evolution loop
+        for _ in range(self.MAX_ITERATIONS):
 
-            # Selection (keep 50% of the population using Tounrnament strategy)
-            selected = self.selectOperator(solutions)
+            # Selection
+            selected_population = self.select_operator(population)
 
             # Crossover
-            children = self.crossover(instance, selected)
+            children = self.crossover(
+                instance,
+                selected_population
+            )
 
-            # Perturb ~1% of children
-            children = self.mutate(children, 0.01, instance["weights"], \
-                                   instance["profits"], instance["capacity"])
+            # Mutation
+            children = self.mutate(
+                children,
+                self.MUTATION_RATE,
+                weights,
+                profits,
+                capacity
+            )
 
-            children = self.format_children(children, instance["weights"], instance["profits"])
+            # Convert children to dictionary format
+            children = self.format_population(
+                children,
+                weights,
+                profits
+            )
 
-            # Merge selected parents + children
-            combined = selected + children
-            combined.sort(key=lambda s: s["profit"])
+            # Merge populations
+            population = selected_population + children
 
-            # keep only 100 individuals
-            solutions = combined[:100]
-        
+            # Sort by profit (descending)
+            population.sort(
+                key=lambda individual: individual["profit"],
+                reverse=True
+            )
 
-        # Find the object where the "profit" key is maximized
-        best_solution = max(solutions, key=lambda x: x['profit'])
+            # Keep best individuals only
+            population = population[:self.POPULATION_SIZE]
 
-        return best_solution
+        # Return best solution
+        return max(
+            population,
+            key=lambda individual: individual["profit"]
+        )

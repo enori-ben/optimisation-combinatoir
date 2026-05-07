@@ -1,171 +1,125 @@
 import numpy as np
 import itertools
+
 from knapsack.knapsack_strategy import Strategy
 from knapsack.nondeterministic_greedy import NonDeterministicGreedyStrategy
 
+
 class LocalSearchBestImprovement(Strategy):
-    
-    def generateAllFeasibleSolutions(self, instance, solution):
-        """
-        Generate all feasible neighboring solutions by exploring move types.
-        Each neighbor is represented as a move tuple (drop_idxs, add_idxs),
-        encoding only the *change* (not the full solution vector), so that
-        the actual decision array is reconstructed lazily when needed.
-        """
 
-        c_decision = solution["decision"]
-        W_cap = instance["capacity"]
-        weights = instance["weights"]
-        profits = instance["profits"]
-        
-        inside_items = np.where(c_decision == 1)[0]
-        outside_items = np.where(c_decision == 0)[0]
+    # =========================================================
+    # Move evaluation
+    # =========================================================
+    def _evaluate_move(self, solution, weights, profits, capacity, drop, add):
 
-        # Pregenerate combinations
-        outside_pairs = list(itertools.combinations(outside_items, 2))
-        inside_pairs = list(itertools.combinations(inside_items, 2))
-        
-        feasibleNeighbors = []
+        weight_delta = 0
+        profit_delta = 0
 
-        # Helper
-        def add_neighbor(drop_idxs, add_idxs):
-            w_delta = sum(weights[j] for j in add_idxs) - sum(weights[i] for i in drop_idxs)
+        for i in drop:
+            weight_delta -= weights[i]
+            profit_delta -= profits[i]
 
-            # feasibility check
-            if solution["weight"] + w_delta <= W_cap:
-                p_delta = sum(profits[j] for j in add_idxs) - sum(profits[i] for i in drop_idxs)
-                
-                
-                feasibleNeighbors.append({
-                    "profit": solution["profit"] + p_delta,
-                    "weight": solution["weight"] + w_delta,
+        for j in add:
+            weight_delta += weights[j]
+            profit_delta += profits[j]
 
-                    # encode the neighbor by a move, the caller should reconstruct the neighbor,
-                    # which is more efficient
-                    "move": (drop_idxs, add_idxs) 
-                })
+        new_weight = solution["weight"] + weight_delta
 
-        # generate up to 100000 neighbor
-        counter = 0
-        # 1-in / 1-out
-        for i in inside_items:
-            for j in outside_items:
-                add_neighbor([i], [j])
-                counter += 1
-            
-            if counter > 20000:
-                break
-
-        # 1-out / 2-in
-        for i in inside_items:
-            for j1, j2 in outside_pairs:
-                add_neighbor([i], [j1, j2])
-                counter += 1
-            
-            if counter > 45000: 
-                break
-
-        # 2-out / 1-in
-        for i1, i2 in inside_pairs:
-            for j in outside_items:
-                add_neighbor([i1, i2], [j])
-                counter += 1
-            
-            if counter > 75000:
-                break
-
-        # 2-out / 2-in
-        for i1, i2 in inside_pairs:
-            for j1, j2 in outside_pairs:
-                add_neighbor([i1, i2], [j1, j2])
-                counter += 1
-            
-            if counter > 100000:
-                break
-
-        return feasibleNeighbors
-
-
-    def solve(self, instance: dict) -> dict:
-
-        W = instance["capacity"]
-
-        nondeterministic_greedy = NonDeterministicGreedyStrategy()
-
-        solution = nondeterministic_greedy.solve(instance)
-
-        improved = True
-        while improved:
-            
-            improved = False
-
-            feasibleNeighbors = self.generateAllFeasibleSolutions(instance, solution)
-
-            if not feasibleNeighbors:
-                break
-
-            best_neighbor = feasibleNeighbors[0]
-
-            for neighbor in feasibleNeighbors[1:]:
-                if neighbor["profit"] > best_neighbor["profit"]:
-                    best_neighbor = neighbor
-
-            if solution["profit"] < best_neighbor["profit"]:
-
-                for drop_idx in best_neighbor["move"][0]:
-                    solution["decision"][drop_idx] = 0
-
-                for add_idx in best_neighbor["move"][1]:
-                    solution["decision"][add_idx] = 1
-                
-                solution["profit"] = best_neighbor["profit"]
-                solution["weight"] = best_neighbor["weight"]
-
-                improved = True
-                    
-
+        if new_weight > capacity:
+            return None
 
         return {
-            "profit": solution["profit"],
-            "weight": solution["weight"],
-            "decision": solution["decision"]
+            "profit": solution["profit"] + profit_delta,
+            "weight": new_weight,
+            "move": (drop, add)
         }
-                
 
+    # =========================================================
+    # Neighbor generator (streaming)
+    # =========================================================
+    def generate_neighbors(self, instance, solution):
 
+        decision = solution["decision"]
+        weights = instance["weights"]
+        profits = instance["profits"]
+        capacity = instance["capacity"]
 
-                
+        inside = np.where(decision == 1)[0]
+        outside = np.where(decision == 0)[0]
 
+        eval_move = lambda d, a: self._evaluate_move(
+            solution, weights, profits, capacity, d, a
+        )
 
-# for i in range(n_items):
+        # 1-out / 1-in
+        for i in inside:
+            for j in outside:
+                n = eval_move([i], [j])
+                if n:
+                    yield n
 
-            #     if current_decision[i] != 1:
-            #         continue
+        # 1-out / 2-in
+        for i in inside:
+            for a in itertools.combinations(outside, 2):
+                n = eval_move([i], list(a))
+                if n:
+                    yield n
 
-            #     for j in range(n_items):
+        # 2-out / 1-in
+        for d in itertools.combinations(inside, 2):
+            for j in outside:
+                n = eval_move(list(d), [j])
+                if n:
+                    yield n
 
-            #         if j == i or current_decision[j] != 0:
-            #             continue
+        # 2-out / 2-in
+        for d in itertools.combinations(inside, 2):
+            for a in itertools.combinations(outside, 2):
+                n = eval_move(list(d), list(a))
+                if n:
+                    yield n
 
-            #         n_weight = current_weight - instance["weights"][i] + instance["weights"][j]
-            #         n_profit = current_profit - instance["profits"][i] + instance["profits"][j]
+    # =========================================================
+    # Solver (Best Improvement)
+    # =========================================================
+    def solve(self, instance: dict) -> dict:
 
-            #         if n_weight <= W and n_profit > best_profit:
+        solution = NonDeterministicGreedyStrategy().solve(instance)
 
-            #             best_move = (i, j)
+        weights = instance["weights"]
+        profits = instance["profits"]
+        capacity = instance["capacity"]
 
-            #             best_weight = n_weight
-            #             best_profit = n_profit
+        while True:
 
-            #             improved = True
-            
-            # if improved:
+            best_neighbor = None
+            best_profit = solution["profit"]
 
-            #     current_decision[best_move[0]] = 0
-            #     current_decision[best_move[1]] = 1
+            # -------------------------------------------------
+            # Find best neighbor
+            # -------------------------------------------------
+            for neighbor in self.generate_neighbors(instance, solution):
 
-            #     current_profit = best_profit
-            #     current_weight = best_weight
-                
+                if neighbor["profit"] > best_profit:
+                    best_profit = neighbor["profit"]
+                    best_neighbor = neighbor
 
+            # Stop if no improvement
+            if best_neighbor is None:
+                break
 
+            # -------------------------------------------------
+            # Apply best move
+            # -------------------------------------------------
+            drop, add = best_neighbor["move"]
+
+            for i in drop:
+                solution["decision"][i] = 0
+
+            for j in add:
+                solution["decision"][j] = 1
+
+            solution["profit"] = best_neighbor["profit"]
+            solution["weight"] = best_neighbor["weight"]
+
+        return solution

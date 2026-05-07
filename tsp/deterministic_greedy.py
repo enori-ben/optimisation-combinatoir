@@ -6,53 +6,49 @@ class DeterministicGreedyStrategy(Strategy):
 
     def solve(self, instance: np.ndarray) -> dict:
 
-        # Initilize the number of cities
-        num_of_cities = instance.shape[1]
+        n = instance.shape[0]
+        adj = instance
 
-        # the graph of cities modeled as an adjancency matrix
-        adj_matrix = instance
-
-        # Initiaze the set of visited cities, which is empty at the beginnig
         visited = set()
 
-        # path taken to make a tour, which empty at the beginnig
-        path = []
+        # better: allow flexibility in start city
+        current = 0
 
-        # Start from city 0 and mark it as visited, 
-        # and initialize the number of visited cities to 1.
-        # Also, because it is the starting point, add to the path list
-        current_city = 0
-        visited.add(0)
-        path.append(0)
+        visited.add(current)
+        path = [current]
 
-        total_distance = 0
+        total = 0.0
 
-        # While we haven't visited all cities
-        while len(visited) < num_of_cities:
-            
-            i = current_city
+        while len(visited) < n:
 
-            # find the nearest unvisited city
-            best = min(
-                (adj_matrix[i, j], (i, j))
-                for j in range(num_of_cities)
-                if j not in visited
-            )
+            best_cost = float("inf")
+            best_city = None
 
-            # update the distance 
-            total_distance += best[0]
+            for j in range(n):
 
-            # mark the new city as visited
-            visited.add(best[1][1])
+                if j not in visited:
 
-            # mark the new city as the current city
-            current_city = best[1][1]
+                    cost = adj[current, j]
 
-            # append it to the path
-            path.append(best[1][1])
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_city = j
 
-        # close the tour and update the total distance
-        total_distance += adj_matrix[0, path[-1]]
-        path.append(0) 
+            # safety check (should never happen)
+            if best_city is None:
+                break
 
-        return {"distance" : total_distance, "path" : path}
+            total += best_cost
+            visited.add(best_city)
+            path.append(best_city)
+
+            current = best_city
+
+        # close tour properly
+        total += adj[path[-1], path[0]]
+        path.append(path[0])
+
+        return {
+            "distance": total,
+            "path": path
+        }

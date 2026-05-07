@@ -4,78 +4,117 @@ import math
 from tsp.tsp_lexer import tokens
 
 
-
+# =========================================================
+# GLOBAL STATE (still used, but safer)
+# =========================================================
 adj_matrix = None
-coordination_matrix = None
-infinity = math.inf
+coord_matrix = None
 instance_name = None
 
+
+# =========================================================
+# DISTANCE FUNCTION
+# =========================================================
 def compute_distance(p1, p2):
-    return math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
+    return math.sqrt(
+        (p2[0] - p1[0]) ** 2 +
+        (p2[1] - p1[1]) ** 2
+    )
 
+
+# =========================================================
+# START RULE
+# =========================================================
 def p_tsp(p):
-    'tsp : definition_section coordination_section end_of_file'
+    """tsp : definition_section coordination_section end_of_file"""
 
-    global adj_matrix
-    global coordination_matrix
+    global adj_matrix, coord_matrix
 
-    # setting the distance between two cities that have no edge to infinity
-    for i in range(adj_matrix.shape[0]):
-        for j in range(adj_matrix.shape[1]):
-            if adj_matrix[i][j] == 0:
-                adj_matrix[i][j] = infinity
+    n = coord_matrix.shape[0]
 
-    p[0] = { "name" : instance_name, "adj_mat" : adj_matrix, "coordination_mat" : coordination_matrix}
+    adj_matrix = np.zeros((n, n))
 
+    # build full symmetric matrix AFTER parsing
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                d = compute_distance(
+                    coord_matrix[i],
+                    coord_matrix[j]
+                )
+                adj_matrix[i][j] = d
+
+    p[0] = {
+        "name": instance_name,
+        "adj_mat": adj_matrix,
+        "coord_mat": coord_matrix
+    }
+
+
+# =========================================================
+# HEADER SECTION
+# =========================================================
 def p_definition_section(p):
-    'definition_section : NAME DIMENSION NUMBER'
+    """definition_section : NAME DIMENSION NUMBER"""
 
-    dimension = int(p[3])
+    global coord_matrix, instance_name
 
-    if dimension > 3000:
-        raise ValueError(f"ABORT: Dimension {dimension} is too large!")
+    n = int(p[3])
 
-    global adj_matrix
-    global coordination_matrix
-    global instance_name
+    if n > 3000:
+        raise ValueError(f"Too large instance: {n}")
 
-    instance_name = p[1] 
-    adj_matrix = np.zeros((int(p[3]), int(p[3])))
-    coordination_matrix = np.zeros((int(p[3]), 3))
+    instance_name = p[1]
 
-def p_coordination_section(p):
-    'coordination_section : COORDINATION_SECTION coordination'
-
-def p_coordination(p):
-    'coordination : NUMBER NUMBER NUMBER coordination'
-
-    global adj_matrix
-    global coordination_matrix
-
-    coordination_matrix[int(p[1])-1][0] = p[2]
-    coordination_matrix[int(p[1])-1][1] = p[3]
-
-    adj_matrix[int(p[1])-1][int(p[1])-1] = infinity
-
-    for i in range(int(p[1]), adj_matrix.shape[1]):
-        distance = compute_distance(tuple(coordination_matrix[i]),
-                                                      (p[2], p[3]))
-        
-        adj_matrix[int(p[1]) - 1][i] = distance
-
-        # By symmetry of the matrix
-        adj_matrix[i][int(p[1]) - 1] = distance
+    coord_matrix = np.zeros((n, 2))
 
 
-def p_empty_coordination(p):
-    'coordination : empty'
+# =========================================================
+# COORD SECTION
+# =========================================================
+def p_coord_section(p):
+    """coordination_section : COORDINATION_SECTION coord_list"""
+
+
+def p_coord_list(p):
+    """coord_list : coord_list coord
+                  | coord"""
+
+
+def p_coord(p):
+    """coord : NUMBER NUMBER NUMBER"""
+
+    node_id = int(p[1]) - 1
+    x = float(p[2])
+    y = float(p[3])
+
+    coord_matrix[node_id] = [x, y]
+
+
+# =========================================================
+# END
+# =========================================================
+def p_end(p):
+    """end_of_file : EOF
+                   | empty"""
+
 
 def p_empty(p):
-    'empty :'
+    """empty :"""
+    pass
 
-def p_end_of_file(p):
-    '''end_of_file : EOF
-                   | empty'''
 
-# Build the parser
+# =========================================================
+# ERROR HANDLING
+# =========================================================
+def p_error(p):
+    if p:
+        print(f"[Parser Error] Token {p.type} -> {p.value}")
+    else:
+        print("[Parser Error] EOF")
+
+
+# =========================================================
+# BUILD PARSER
+# =========================================================
 parser = yacc.yacc()
